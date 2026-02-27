@@ -208,12 +208,8 @@ export const DuplicateActionModal = ({ dashboard, isOpen, onClose }: ActionModal
     return allProjects[0] || '';
   }, [dashboard, editableProjects, allProjects]);
 
-  const { schema: validationSchema } = useDashboardValidationSchema(defaultProject, t);
-
   const form = useForm<CreateDashboardValidationType>({
-    resolver: validationSchema
-      ? zodResolver(validationSchema)
-      : zodResolver(createDashboardDialogValidationSchema(t)),
+    resolver: zodResolver(createDashboardDialogValidationSchema(t)),
     mode: 'onBlur',
     defaultValues: {
       projectName: defaultProject,
@@ -222,6 +218,12 @@ export const DuplicateActionModal = ({ dashboard, isOpen, onClose }: ActionModal
   });
 
   const selectedProjectName = form.watch('projectName');
+  const dashboardName = form.watch('dashboardName');
+
+  const { schema: dynamicValidationSchema, isSchemaLoading } = useDashboardValidationSchema(
+    selectedProjectName,
+    t,
+  );
 
   const projectOptions = useMemo<TypeaheadSelectOption[]>(() => {
     if (!editableProjects) {
@@ -235,6 +237,48 @@ export const DuplicateActionModal = ({ dashboard, isOpen, onClose }: ActionModal
   }, [editableProjects, selectedProjectName]);
 
   const createDashboardMutation = useCreateDashboardMutation();
+
+  React.useEffect(() => {
+    const isPerseProject = persesProjects?.some(
+      (project) => project.metadata?.name === selectedProjectName,
+    );
+
+    if (dynamicValidationSchema && selectedProjectName && !isSchemaLoading && isPerseProject) {
+      const currentValues = form.getValues();
+      const result = dynamicValidationSchema.safeParse(currentValues);
+
+      if (!result.success) {
+        const hasDashboardIssue = result.error.issues.some(
+          (issue) => issue.path[0] === 'dashboardName',
+        );
+
+        if (hasDashboardIssue) {
+          result.error.issues.forEach((issue) => {
+            if (issue.path[0] === 'dashboardName') {
+              form.setError('dashboardName', {
+                type: 'validate',
+                message: issue.message,
+              });
+            }
+          });
+        } else {
+          form.clearErrors('dashboardName');
+        }
+      } else {
+        form.clearErrors('dashboardName');
+      }
+    } else if (!isPerseProject && selectedProjectName) {
+      // Clear any existing validation errors for non-Perses projects
+      form.clearErrors('dashboardName');
+    }
+  }, [
+    selectedProjectName,
+    dynamicValidationSchema,
+    form,
+    dashboardName,
+    isSchemaLoading,
+    persesProjects,
+  ]);
 
   React.useEffect(() => {
     if (isOpen && dashboard && editableProjects?.length > 0 && defaultProject) {
@@ -435,9 +479,10 @@ export const DuplicateActionModal = ({ dashboard, isOpen, onClose }: ActionModal
                   !(form.watch('dashboardName') || '')?.trim() ||
                   !(form.watch('projectName') || '')?.trim() ||
                   !hasEditableProject ||
+                  isSchemaLoading ||
                   createDashboardMutation.isPending
                 }
-                isLoading={createDashboardMutation.isPending}
+                isLoading={createDashboardMutation.isPending || isSchemaLoading}
               >
                 {t('Duplicate')}
               </Button>
